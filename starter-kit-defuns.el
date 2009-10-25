@@ -34,15 +34,15 @@ Symbols matching the text at point are put first in the completion list."
                              (cond
                               ((and (listp symbol) (imenu--subalist-p symbol))
                                (addsymbols symbol))
-                              
+
                               ((listp symbol)
                                (setq name (car symbol))
                                (setq position (cdr symbol)))
-                              
+
                               ((stringp symbol)
                                (setq name symbol)
                                (setq position (get-text-property 1 'org-imenu-marker symbol))))
-                             
+
                              (unless (or (null position) (null name))
                                (add-to-list 'symbol-names name)
                                (add-to-list 'name-and-pos (cons name position))))))))
@@ -96,7 +96,7 @@ Symbols matching the text at point are put first in the completion list."
 (add-hook 'coding-hook 'local-comment-auto-fill)
 (add-hook 'coding-hook 'turn-on-hl-line-mode)
 (add-hook 'coding-hook 'pretty-lambdas)
-  
+
 (defun run-coding-hook ()
   "Enable things that are convenient across all coding buffers."
   (run-hooks 'coding-hook))
@@ -210,13 +210,105 @@ Symbols matching the text at point are put first in the completion list."
   (interactive)
   (message "%s" (point)))
 
-(defun toggle-fullscreen ()
+(cond (eq system-type 'darwin)
+      (defun toggle-fullscreen ()
+        (interactive)
+        (set-frame-parameter nil 'fullscreen
+                             (if (frame-parameter nil 'fullscreen)
+                                 nil
+                               'fullboth)))
+
+      (or (eq system-type 'gnu/linux)
+          (eq system-type 'linux))
+      (defun toggle-fullscreen ()
+        (interactive)
+        ;; TODO: this only works for X. patches welcome for other OSes.
+        (x-send-client-message nil 0 nil "_NET_WM_STATE" 32
+                               '(2 "_NET_WM_STATE_MAXIMIZED_VERT" 0))
+        (x-send-client-message nil 0 nil "_NET_WM_STATE" 32
+                               '(2 "_NET_WM_STATE_MAXIMIZED_HORZ" 0)))
+
+      (eq system-type 'windows)
+      ;;TODO put the win32 thing in here
+      (defun toggle-fullscreen()
+        (interactive)
+        "Toggle fullscreen display of current frame (windows only)"
+        (cond ((w32-fullscreen-recall 'enabled)
+               (w32-fullscreen-remember 'enabled nil)
+               (w32-fullscreen-off))
+              (t
+               (w32-fullscreen-remember 'enabled t)
+               (w32-fullscreen-on))))
+)
+
+;; ------ configuration -----
+(defvar w32-fullscreen-toggletitle-cmd
+   (concat dotfiles-dir "/w32toggletitle.exe")
+   "w32toggletitle.exe")
+
+;; ------ code -----
+(defun w32-fullscreen-maximize-frame ()
+  "Maximize the current frame (windows only)"
   (interactive)
-  ;; TODO: this only works for X. patches welcome for other OSes.
-  (x-send-client-message nil 0 nil "_NET_WM_STATE" 32
-                         '(2 "_NET_WM_STATE_MAXIMIZED_VERT" 0))
-  (x-send-client-message nil 0 nil "_NET_WM_STATE" 32
-                         '(2 "_NET_WM_STATE_MAXIMIZED_HORZ" 0)))
+  (w32-send-sys-command 61488))
+
+(defun w32-fullscreen-restore-frame ()
+  "Restore a minimized/maximized frame (windows only)"
+  (interactive)
+  (w32-send-sys-command 61728))
+
+(defun w32-fullscreen-toggle-titlebar ()
+  "Toggle display of the titlebar of frame (windows only)"
+  (interactive)
+  (call-process "H:/w32toggletitle.exe"
+		  nil nil nil
+		  (frame-parameter (selected-frame) 'window-id))
+  (sleep-for 0.2))
+
+(setq *w32-fullscreen-memtable* (make-hash-table))
+
+(defun* w32-fullscreen-recall (var &optional (frame (selected-frame)))
+  (cdr (assoc var (gethash frame *w32-fullscreen-memtable*))))
+
+(defun* w32-fullscreen-remember (var val &optional (frame (selected-frame)))
+  (let* ((varlist (gethash frame *w32-fullscreen-memtable*))
+	 (target (assoc var varlist)))
+    (cond (target
+	   (setf (cdr target) val))
+	  (t
+	   (puthash frame (cons (cons var val)
+				varlist) *w32-fullscreen-memtable*)))))
+
+
+
+(defun w32-fullscreen-on ()
+  "Enable fullscreen display of current frame (windows only)"
+  (interactive)
+  ; - remember interface settings
+  (w32-fullscreen-remember 'menu-bar-lines
+			   (frame-parameter nil 'menu-bar-lines))
+  (w32-fullscreen-remember 'tool-bar-lines
+			   (frame-parameter nil 'tool-bar-lines))
+  (w32-fullscreen-remember 'vertical-scroll-bars
+	(frame-parameter nil 'vertical-scroll-bars))
+  ; - set interface settings
+  (modify-frame-parameters (selected-frame)
+			   '((menu-bar-lines . 0) (tool-bar-lines . 0)
+			     (vertical-scroll-bars . nil)))
+  (w32-fullscreen-toggle-titlebar)
+  (w32-fullscreen-maximize-frame))
+
+(defun w32-fullscreen-off ()
+  "Disable fullscreen display of current frame (windows only)"
+  (interactive)
+  ; - restore interface settings
+  (modify-frame-parameters
+   (selected-frame)
+   `((menu-bar-lines . ,(w32-fullscreen-recall 'menu-bar-lines))
+     (tool-bar-lines . ,(w32-fullscreen-recall 'tool-bar-lines))
+     (vertical-scroll-bars . ,(w32-fullscreen-recall 'vertical-scroll-bars))))
+  (w32-fullscreen-restore-frame)
+  (w32-fullscreen-toggle-titlebar))
 
 
 ;; A monkeypatch to cause annotate to ignore whitespace
